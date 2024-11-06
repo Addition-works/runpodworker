@@ -80,6 +80,7 @@ def post_request(payload):
 
         if 'output' in resp_json:
             handle_response(resp_json, timer)
+            return resp_json
         else:
             job_status = resp_json.get('status', STATUS_FAILED)
             print(f'Job status: {job_status}')
@@ -113,6 +114,7 @@ def post_request(payload):
                             request_in_queue = False
                             print(f'RunPod request {request_id} completed')
                             handle_response(resp_json, timer)
+                            return resp_json
                         elif job_status == STATUS_TIMED_OUT:
                             request_in_queue = False
                             print(f'ERROR: RunPod request {request_id} timed out')
@@ -136,6 +138,6 @@ def post_request(payload):
                 except Exception as e:
                     print(json.dumps(resp_json, indent=4, default=str))
             else:
-                print(json.dumps(resp_json, indent=4, default=str))
+                return resp_json
     else:
         print(f'ERROR: {r.content}')

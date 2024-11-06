@@ -6,7 +6,10 @@ INPUT_SCHEMA = {
         'constraints': lambda workflow: workflow in [
             'default',
             'txt2img',
-            'custom'
+            'txt2im_base',
+            'im2im_base',
+            'inpaint',
+            'product_alt'
         ]
     },
     'payload': {

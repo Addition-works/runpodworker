@@ -38,11 +38,15 @@ RUN apt update && \
 # Set Python
 RUN ln -s /usr/bin/python3.10 /usr/bin/python
 
+COPY requirements.txt ./
+# Install Worker dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Install Worker dependencies
 RUN pip install requests runpod
 
 # Add RunPod Handler and Docker container start script
-COPY start.sh rp_handler.py ./
+COPY start.sh rp_handler.py leafhome-backend-4eaca2289782.json ./
 
 # Add validation schemas
 COPY schemas /schemas

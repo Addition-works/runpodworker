@@ -10,7 +10,7 @@ from runpod.serverless.utils.rp_validator import validate
 from runpod.serverless.modules.rp_logger import RunPodLogger
 from requests.adapters import HTTPAdapter, Retry
 from schemas.input import INPUT_SCHEMA
-
+from google.cloud import storage
 
 BASE_URI = 'http://127.0.0.1:3000'
 VOLUME_MOUNT_PATH = '/runpod-volume'
@@ -95,12 +95,64 @@ def get_img2img_payload(workflow, payload):
     return workflow
 
 
+def get_im2imbase_payload(workflow, payload):
+    workflow["182"]["inputs"]["image"] = payload["image"]
+    workflow["180"]["inputs"]["value"] = payload["resemblance"]    
+    workflow["152"]["inputs"]["width"] = payload["width"]
+    workflow["152"]["inputs"]["height"] = payload["height"]
+    workflow["102"]["inputs"]["noise_seed"] = payload["seed"]
+
+    return workflow
+
+
+def get_product_alt_payload(workflow, payload):
+    workflow["177"]["inputs"]["image"] = payload['alpha']
+    workflow["178"]["inputs"]["image"] = payload['depth']
+    workflow["179"]["inputs"]["image"] = payload['mask']
+    workflow["179"]["inputs"]["text"] = payload['prompt']
+    workflow["21"]["inputs"]["seed"] = payload["seed"]
+    workflow["131"]["inputs"]["noise_seed"] = payload["seed"]
+    workflow["137"]["inputs"]["noise_seed"] = payload["seed"]
+    return workflow
+
+
+def get_txt2imbase_payload(workflow, payload):
+    workflow["5"]["inputs"]["width"] = payload["width"]
+    workflow["5"]["inputs"]["height"] = payload["height"]
+    workflow["73"]["inputs"]["text_2"] = payload["subject"]
+    workflow["73"]["inputs"]["text_3"] = payload["scene"]
+    workflow["73"]["inputs"]["text_4"] = payload["style"]
+
+    workflow["25"]["inputs"]["noise_seed"] = payload["seed"]
+    workflow["82"]["inputs"]["noise_seed"] = payload["seed"]
+    return workflow
+
+def get_inpaint_payload(workflow, payload):
+    workflow["185"]["inputs"]["image"] = payload["image"]
+    workflow["187"]["inputs"]["mask"] = payload["mask"]
+
+    workflow["52"]["inputs"]["noise_seed"] = payload["seed"]
+    workflow["45"]["inputs"]["text"] = payload["prompt"]
+    if 'negative_prompt' in payload and payload['negative_prompt']:
+        workflow["57"]["inputs"]["text"] = payload["negative_prompt"]
+
+    return workflow
+
+
 def get_workflow_payload(workflow_name, payload):
     with open(f'/workflows/{workflow_name}.json', 'r') as json_file:
         workflow = json.load(json_file)
 
     if workflow_name == 'txt2img':
         workflow = get_txt2img_payload(workflow, payload)
+    elif workflow_name == 'im2im_base':
+        workflow = get_im2imbase_payload(workflow, payload)
+    elif workflow_name == 'product_alt':
+        workflow = get_product_alt_payload(workflow, payload)
+    elif workflow_name == 'txt2im_base':
+        workflow = get_txt2imbase_payload(workflow, payload)
+    elif workflow_name == 'inpaint':
+        workflow = get_inpaint_payload(workflow, payload)
 
     return workflow
 
@@ -125,6 +177,21 @@ def create_unique_filename_prefix(payload):
 
         if class_type == 'SaveImage':
             payload[key]['inputs']['filename_prefix'] = str(uuid.uuid4())
+
+
+def upload_output_to_gcs(imid, image, model=None):    
+    print('Uploading to GCS')
+    prefix = image.split('/')[-1].split('_')[0]
+    storagecredfile = os.path.join(os.path.dirname(__file__), 'leafhome-backend-4eaca2289782.json')
+    storage_client = storage.Client.from_service_account_json(storagecredfile)    
+    bucket = storage_client.bucket("addition-leafhome-generations")
+    if model is not None:
+        prefix = f'{model}_{prefix}'
+    blob = bucket.blob(f'output/{prefix}_{imid}.png')
+    blob.upload_from_filename(image)
+    os.remove(image)
+    return blob.public_url
+
 
 
 # ---------------------------------------------------------------------------- #
@@ -187,23 +254,22 @@ def handler(event):
                 time.sleep(0.2)
                 retries += 1
 
-            if len(resp_json[prompt_id]['outputs']):
-                logger.info(f'Images generated successfully for prompt: {prompt_id}', job_id)
-                image_filenames = get_filenames(resp_json[prompt_id]['outputs'])
-                images = []
-
-                for image_filename in image_filenames:
-                    filename = image_filename['filename']
-                    image_path = f'{VOLUME_MOUNT_PATH}/ComfyUI/output/{filename}'
-
-                    with open(image_path, 'rb') as image_file:
-                        images.append(base64.b64encode(image_file.read()).decode('utf-8'))
-
-                    logger.info(f'Deleting output file: {image_path}', job_id)
-                    os.remove(image_path)
-
+            if len(resp_json[prompt_id]['outputs']):                
+                resp_json = resp_json[prompt_id]
+                logger.info(f"responsejson is type: {type(resp_json)}")
+                logger.info(f"respjson keys: {list(resp_json.keys())}")
+                logger.info(resp_json)
+                logger.info(f'Image generated successfully for prompt: {prompt_id}')
+                result = []
+                resp_json['uploaded_images'] = []
+                for k, v in resp_json['outputs'].items():
+                    if 'files' in v:
+                        filename = v['files'][0]                    
+                        public_url = upload_output_to_gcs(prompt_id, filename)                    
+                        resp_json['uploaded_images'].append(public_url)   
+                
                 return {
-                    'images': images
+                    "results": resp_json,
                 }
             else:
                 logger.info(f'Response JSON: {resp_json}', job_id)

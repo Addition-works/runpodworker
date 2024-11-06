@@ -2,3 +2,4 @@ Pillow
 requests
 python-dotenv
 runpod
+google-cloud-storage==2.16.0
